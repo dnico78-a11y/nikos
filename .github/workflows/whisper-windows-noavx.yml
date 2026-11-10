@@ -1,0 +1,37 @@
+name: Compiler Whisper Windows sans AVX pour Pentium G4400T
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Recuperer whisper.cpp v1.9.5
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.5.zip' -OutFile source.zip
+          Expand-Archive -Path source.zip -DestinationPath .
+      - name: Compiler sans AVX, FMA, F16C, BMI2
+        shell: pwsh
+        run: |
+          cmake -S whisper.cpp-1.9.5 -B build -G 'Visual Studio 17 2022' -A x64 `
+            -DGGML_NATIVE=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF `
+            -DGGML_FMA=OFF -DGGML_F16C=OFF -DGGML_BMI2=OFF `
+            -DGGML_AVX_VNNI=OFF -DGGML_AVX512=OFF `
+            -DGGML_SSE42=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF `
+            -DWHISPER_SDL2=OFF -DWHISPER_BUILD_TESTS=OFF
+          cmake --build build --config Release --parallel 2
+      - name: Preparer binaires avec DLL
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          $exe = Get-ChildItem -Path build -Filter whisper-cli.exe -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'whisper-cli.exe introuvable' }
+          Copy-Item $exe.FullName package\whisper-cli.exe
+          Get-ChildItem -Path build -Filter '*.dll' -Recurse | Where-Object { $_.Name -match '^(whisper|ggml)' } | ForEach-Object { Copy-Item $_.FullName package\ -Force }
+          if ((Get-ChildItem package -Filter 'ggml*.dll').Count -eq 0) { Write-Host 'Verifier build statique ou DLL generees' }
+      - name: Publier ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-g4400t-noavx-windows
+          path: package/*
+          if-no-files-found: error
